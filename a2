@@ -1,0 +1,76 @@
+-- 0x商城 - 題目與答案自動收集器
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
+
+-- 填入你最新的 Webhook 網址
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1509930598171545640/VZH02kKq8PVS2lKMFPT4sQeqD1wlzlKYJusjO_yrnrSyoYslO33WloyzjRQbz9SiqKnI"
+
+-- 精準鎖定你找到的題目路徑
+local topicObject = ReplicatedStorage:WaitForChild("RoundControlFolder"):WaitForChild("TopicControl"):WaitForChild("TopicDesc")
+
+local currentTopic = ""
+
+-- 發送題庫配對回報
+local function sendToDictionary(topic, guessedAnswer)
+	local httpService = game:GetService("HttpService")
+	
+	-- 格式化成標準 Lua Table 格式，方便你以後直接複製貼上到新腳本裡
+	local luaCodeLine = string.format('["%s"] = "%s",', topic, guessedAnswer)
+	
+	local embedData = {
+		["embeds"] = {{
+			["title"] = "📚 0x商城 - 題庫自動收集日誌",
+			["color"] = 3066993, -- 綠色
+			["description"] = "偵測到新的題目與答案配對！",
+			["fields"] = {
+				{["name"] = "📝 題目敘述 (Topic)", ["value"] = "`" .. topic .. "`", ["inline"] = true},
+				{["name"] = "🎯 玩家輸入/答案", ["value"] = "`" .. guessedAnswer .. "`", ["inline"] = true},
+				{["name"] = "📋 複製用 Lua 代碼", ["value"] = "```lua\n" .. luaCodeLine .. "\n```", ["inline"] = false}
+			},
+			["timestamp"] = DateTime.now():ToIsoDate()
+		}}
+	}
+
+	local jsonPayload = httpService:JSONEncode(embedData)
+	local sendRequest = request or http_request or (syn and syn.request)
+	if sendRequest then
+		task.spawn(function()
+			pcall(function()
+				sendRequest({
+					Url = WEBHOOK_URL,
+					Method = "POST",
+					Headers = {["Content-Type"] = "application/json"},
+					Body = jsonPayload
+				})
+			end)
+		end)
+	end
+end
+
+-- 1. 監聽題目變動
+topicObject.Changed:Connect(function(newTopic)
+	if newTopic and newTopic ~= "" and newTopic ~= "Waiting..." then
+		currentTopic = tostring(newTopic)
+		print("0xShop: 偵測到新題目 -> " .. currentTopic)
+	end
+end)
+
+-- 2. 監聽玩家自己輸入的文字（當你拼對按下 Enter 時，通常代表這就是答案）
+-- 假設拼字遊戲是透過 TextBox 讓玩家輸入，這裡會自動監聽你輸入了什麼
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+playerGui.DescendantAdded:Connect(function(desc)
+	if desc:IsA("TextBox") then
+		desc.FocusLost:Connect(function(enterPressed)
+			-- 當玩家按下 Enter 提交答案，且目前有題目時
+			if enterPressed and currentTopic ~= "" and #desc.Text > 0 then
+				local answer = desc.Text
+				-- 延時一下，確認你真的答對了（可以自行根據遊戲判定調整）
+				task.wait(0.5) 
+				sendToDictionary(currentTopic, answer)
+			end
+		end)
+	end
+end)
+
+print("📡 0x商城 - 題庫收集雷達已鎖定 TopicDesc，開始自動編譜...")
