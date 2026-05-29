@@ -1,0 +1,73 @@
+-- 放置於 StarterPlayer -> StarterPlayerScripts 的 LocalScript
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local GuiService = game:GetService("GuiService") -- 引入剪貼簿服務
+
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+local lastDetectedWord = "" -- 紀錄上一次抓到的單字，避免重複複製
+
+local function isPotentialWord(str)
+	if not str or type(str) ~= "string" then return false end
+	str = string.gsub(str, "^%s*(.-)%s*$", "%1")
+	if str == "Label" or str == "Text" or #str <= 1 then return false end
+	return string.match(str, "%a+")
+end
+
+-- 核心功能：複製到剪貼簿並在左下角聊天室提醒你
+local function copyToClipboard(word, source)
+	if word == lastDetectedWord then return end
+	lastDetectedWord = word
+	
+	-- 執行複製動作
+	local success, err = pcall(function()
+		GuiService:SetClipboard(word)
+	end)
+	
+	if success then
+		-- 在本地聊天室發送一個只有你看得到的提示
+		game:GetService("StarterGui"):SetCore("ChatMakeSystemMessage", {
+			Text = string.format("📋 [0x商城提示] 已自動複製單字: 【%s】 (來源: %s)", word, source),
+			Color = Color3.fromRGB(0, 255, 255),
+			Font = Enum.Font.SourceSansBold
+		})
+		print(string.format("✅ 成功複製到剪貼簿: %s", word))
+	else
+		warn("❌ 複製到剪貼簿失敗: " .. tostring(err))
+	end
+end
+
+local function scanForCurrentWord()
+	-- 1. 優先掃描 UI
+	for _, gui in ipairs(playerGui:GetChildren()) do
+		if gui:IsA("ScreenGui") then
+			for _, desc in ipairs(gui:GetDescendants()) do
+				if desc:IsA("TextLabel") or desc:IsA("TextBox") or desc:IsA("TextButton") then
+					local text = desc.Text
+					if isPotentialWord(text) then
+						copyToClipboard(text, "UI -> " .. desc.Name)
+						return
+					end
+				end
+			end
+		end
+	end
+	
+	-- 2. 次要掃描 ReplicatedStorage
+	for _, desc in ipairs(ReplicatedStorage:GetDescendants()) do
+		if desc:IsA("StringValue") and isPotentialWord(desc.Value) then
+			copyToClipboard(desc.Value, "ReplicatedStorage -> " .. desc.Name)
+			return
+		end
+	end
+end
+
+-- 每 1.5 秒高速掃描一次，確保一換字就秒抓
+task.spawn(function()
+	if not game:IsLoaded() then game.Loaded:Wait() end
+	while true do
+		scanForCurrentWord()
+		task.wait(1.5)
+	end
+end)
