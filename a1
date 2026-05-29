@@ -1,0 +1,85 @@
+-- 0x商城 - 終極效率動態變動追蹤器（更新 Webhook 網址）
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
+
+-- 更新後的 Discord Webhook 網址
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1509930598171545640/VZH02kKq8PVS2lKMFPT4sQeqD1wlzlKYJusjO_yrnrSyoYslO33WloyzjRQbz9SiqKnI"
+
+-- 判定是否可能為答案單字（排除數字、Classic、過短字、UI 預設字）
+local function isCandidate(val)
+	local str = tostring(val)
+	if #str <= 1 then return false end
+	if string.match(str, "%d") then return false end -- 過濾掉包含數字的參數
+	if str == "Classic" or str == "Label" or str == "Text" or str == "TextBox" then return false end
+	return string.match(str, "%a+") ~= nil
+end
+
+-- 發送精準變動報告到新 Webhook
+local function reportTarget(path, newValue)
+	local httpService = game:GetService("HttpService")
+	local embedData = {
+		["embeds"] = {{
+			["title"] = "🎯 0x商城 - 偵測到數值實時變動！",
+			["color"] = 16711680, -- 亮紅色（最顯眼）
+			["description"] = "這個底層數據在換回合/換題目的瞬間改變了，極有可能是答案！",
+			["fields"] = {
+				{["name"] = "🔑 變動參數路徑", ["value"] = "```lua\n" .. path .. "\n```", ["inline"] = false},
+				{["name"] = "🆕 刷新數值", ["value"] = "```\n" .. tostring(newValue) .. "\n```", ["inline"] = false}
+			},
+			["timestamp"] = DateTime.now():ToIsoDate()
+		}}
+	}
+
+	local jsonPayload = httpService:JSONEncode(embedData)
+	local sendRequest = request or http_request or (syn and syn.request)
+	if sendRequest then
+		task.spawn(function()
+			pcall(function()
+				sendRequest({
+					Url = WEBHOOK_URL,
+					Method = "POST",
+					Headers = {["Content-Type"] = "application/json"},
+					Body = jsonPayload
+				})
+			end)
+		end)
+	end
+end
+
+-- 綁定 Changed 監聽事件
+local function bindListener(child)
+	if child:IsA("ValueBase") then
+		child.Changed:Connect(function(newValue)
+			if isCandidate(newValue) then
+				reportTarget(child:GetFullName(), newValue)
+			end
+		end)
+	end
+end
+
+-- 遍歷並初始化監聽（排除 UI 文字，只鎖定後台數據庫）
+local function setupTracker(root)
+	local success, descendants = pcall(function() return root:GetDescendants() end)
+	if not success or not descendants then return end
+	
+	for _, desc in ipairs(descendants) do
+		bindListener(desc)
+	end
+	
+	-- 監聽後續動態生成的新物件
+	root.DescendantAdded:Connect(function(desc)
+		task.wait(0.1) -- 延時確保屬性完全載入
+		bindListener(desc)
+	end)
+end
+
+-- 啟動追蹤流程
+task.spawn(function()
+	if not game:IsLoaded() then game.Loaded:Wait() end
+	print("📡 0x商城 - 精準變動實時監聽已啟動（使用新 Webhook）...")
+	
+	-- 鎖定最核心的兩個後台數據源
+	setupTracker(ReplicatedStorage)
+	setupTracker(localPlayer)
+end)
