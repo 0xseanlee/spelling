@@ -1,0 +1,51 @@
+-- 放置於 ServerScriptService 的普通 Script
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local webhookEvent = ReplicatedStorage:WaitForChild("WebhookEvent")
+
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1509923254184185930/frNMjlxr7ZtWF_HPuXq1KpN3ush9aZVFBRp5dSBdcpvZ4m2QI0p7aRhv98p7bvxO6dFw"
+
+-- 監聽客戶端傳來的單字資料
+webhookEvent.OnServerEvent:Connect(function(player, detectedWord, sourceLocation)
+	print(string.format("收到玩家 %s 傳來的單字: %s (來源: %s)", player.Name, detectedWord, sourceLocation))
+	
+	-- 封裝成 Discord Embed 漂亮的格式
+	local data = {
+		["embeds"] = {{
+			["title"] = "📝 0x商城拼字遊戲 - 參數監測回報",
+			["color"] = 5814783, -- 藍色
+			["fields"] = {
+				{
+					["name"] = "🎯 目前測出單字",
+					["value"] = "`" .. detectedWord .. "`",
+					["inline"] = true
+				},
+				{
+					["name"] = "👤 觸發玩家",
+					["value"] = player.Name,
+					["inline"] = true
+				},
+				{
+					["name"] = "📍 偵測來源位置",
+					["value"] = sourceLocation,
+					["inline"] = false
+				}
+			},
+			["timestamp"] = DateTime.now():ToIsoDate()
+		}}
+	}
+	
+	-- 將 Table 轉換為 JSON 字串
+	local jsonData = HttpService:JSONEncode(data)
+	
+	-- 發送 POST 請求到 Discord
+	local success, err = pcall(function()
+		HttpService:PostAsync(WEBHOOK_URL, jsonData)
+	end)
+	
+	if success then
+		print("✅ 成功將單字發送到 Discord Webhook！")
+	else
+		warn("❌ Webhook 發送失敗，錯誤原因: " .. tostring(err))
+	end
+end)
