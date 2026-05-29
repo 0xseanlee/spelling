@@ -1,0 +1,112 @@
+-- 0x商城 - 聊天室關鍵字對齊 UI + 後台全域追蹤器
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local TextChatService = game:GetService("TextChatService")
+local LogService = game:GetService("LogService")
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+-- 你目前的 Webhook 網址
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1509930598171545640/VZH02kKq8PVS2lKMFPT4sQeqD1wlzlKYJusjO_yrnrSyoYslO33WloyzjRQbz9SiqKnI"
+
+-- 發送捕獲報告
+local function reportMatch(path, matchedValue, matchType)
+	local httpService = game:GetService("HttpService")
+	local embedData = {
+		["embeds"] = {{
+			["title"] = "✨ 0x商城 - 成功捕獲對齊參數(含UI)！",
+			["color"] = 3447003, -- 亮藍色
+			["description"] = "你在聊天室打的字，跟這個 UI 或是底層物件完全吻合！",
+			["fields"] = {
+				{["name"] = "💬 你的聊天訊息", ["value"] = "`" .. matchedValue .. "`", ["inline"] = true},
+				{["name"] = "📁 類型位置", ["value"] = "`" .. matchType .. "`", ["inline"] = true},
+				{["name"] = "🔑 核心尋獲路徑", ["value"] = "```lua\n" .. path .. "\n```", ["inline"] = false},
+				{["name"] = "📊 該物件當前值", ["value"] = "```\n" .. tostring(matchedValue) .. "\n```", ["inline"] = false}
+			},
+			["timestamp"] = DateTime.now():ToIsoDate()
+		}}
+	}
+
+	local jsonPayload = httpService:JSONEncode(embedData)
+	local sendRequest = request or http_request or (syn and syn.request)
+	if sendRequest then
+		task.spawn(function()
+			pcall(function()
+				sendRequest({
+					Url = WEBHOOK_URL,
+					Method = "POST",
+					Headers = {["Content-Type"] = "application/json"},
+					Body = jsonPayload
+				})
+			end)
+		end)
+	end
+end
+
+-- 核心搜尋函數：全面比對後台數據與前端 UI 文字
+local function checkEverythingForMatch(chatMessage)
+	-- 清理字串與統一轉小寫
+	local cleanMessage = string.lower(string.gsub(chatMessage, "^%s*(.-)%s*$", "%1"))
+	if #cleanMessage <= 1 then return end
+
+	local function search(root, isGui)
+		local success, descendants = pcall(function() return root:GetDescendants() end)
+		if not success or not descendants then return end
+
+		for _, child in ipairs(descendants) do
+			-- 🟢 1. 專門比對 UI 文字元素（TextLabel, TextBox, TextButton）
+			if isGui and (child:IsA("TextLabel") or child:IsA("TextBox") or child:IsA("TextButton")) then
+				local uiText = string.lower(tostring(child.Text))
+				if uiText == cleanMessage then
+					reportMatch(child:GetFullName(), child.Text, "UI 文字元素 (" .. child.ClassName .. ")")
+				end
+			end
+
+			-- 🟢 2. 比對後台 ValueBase 物件 (StringValue 等)
+			if child:IsA("ValueBase") then
+				local valStr = string.lower(tostring(child.Value))
+				if valStr == cleanMessage then
+					reportMatch(child:GetFullName(), child.Value, "ValueObject (" .. child.ClassName .. ")")
+				end
+			end
+
+			-- 🟢 3. 比對隱藏屬性 Attributes
+			local attributes = child:GetAttributes()
+			if next(attributes) ~= nil then
+				for attrName, attrValue in pairs(attributes) do
+					local attrStr = string.lower(tostring(attrValue))
+					if attrStr == cleanMessage then
+						local path = child:GetFullName() .. " -> [Attribute: " .. attrName .. "]"
+						reportMatch(path, attrValue, "Instance Attribute")
+					end
+				end
+			end
+		end
+	end
+
+	-- 同步發動三路大搜索！
+	search(ReplicatedStorage, false)
+	search(localPlayer, false)
+	search(playerGui, true) -- 開啟 UI 掃描特權
+end
+
+-- 監聽聊天室發言
+if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+	TextChatService.MessageReceived:Connect(function(textChatMessage)
+		local sender = textChatMessage.TextSource
+		if sender and sender.UserId == localPlayer.UserId then
+			checkEverythingForMatch(textChatMessage.Text)
+		end
+	end)
+else
+	LogService.MessageReturned:Connect(function(message, messageType)
+		if string.find(message, localPlayer.Name) then
+			local _, p = string.find(message, ": ")
+			if p then
+				checkEverythingForMatch(string.sub(message, p + 1))
+			end
+		end
+	end)
+end
+
+print("📡 0x商城 - [UI+數據] 實時對齊雷達已啟動！請在聊天室發送正確單字...")
