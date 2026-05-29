@@ -1,0 +1,70 @@
+-- 放置於 StarterPlayer -> StarterPlayerScripts 的 LocalScript
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+-- 檢查這個字串是不是可能是拼字遊戲的單字（過濾掉空白或太短的字）
+local function isPotentialWord(str)
+	if not str or type(str) ~= "string" then return false end
+	-- 移除前後空白
+	str = string.gsub(str, "^%s*(.-)%s*$", "%1")
+	-- 如果包含英文字母，且長度大於 1，就列入懷疑對象
+	return string.match(str, "%a+") and #str > 1
+end
+
+local function scanForCurrentWord()
+	print("\n🔍 === [ 0x商城雷達 ] 開始全面掃描當前單字 ===")
+	
+	-- 🕵️‍♂️ 1. 深度搜尋所有螢幕 UI 介面
+	print("【1】正在掃描 UI 文字標籤...")
+	for _, gui in ipairs(playerGui:GetChildren()) do
+		if gui:IsA("ScreenGui") then
+			for _, desc in ipairs(gui:GetDescendants()) do
+				-- 只要是 TextLabel、TextBox 或 TextButton
+				if desc:IsA("TextLabel") or desc:IsA("TextBox") or desc:IsA("TextButton") then
+					local text = desc.Text
+					if isPotentialWord(text) and text ~= "Label" and text ~= "Text" then
+						print(string.format("   📍 發現 UI 位置: %s.%s -> 當前文字: \"%s\"", gui.Name, desc:GetFullName():sub(#gui:GetFullName()+2), text))
+					end
+				end
+			end
+		end
+	end
+	
+	-- 📦 2. 深度搜尋 ReplicatedStorage（伺服器常把單字存在這裡讓前端讀取）
+	print("【2】正在掃描 ReplicatedStorage 共享數值...")
+	for _, desc in ipairs(ReplicatedStorage:GetDescendants()) do
+		-- 檢查所有 StringValue 物件
+		if desc:IsA("StringValue") then
+			local val = desc.Value
+			if isPotentialWord(val) then
+				print(string.format("   📦 發現共享字串 [%s] -> 當前數值: \"%s\"", desc:GetFullName(), val))
+			end
+		-- 檢查物件的屬性名稱是不是叫 Word、CurrentWord、Target 等
+		elseif string.find(string.lower(desc.Name), "word") or string.find(string.lower(desc.Name), "spell") then
+			if desc:IsA("ValueBase") then
+				print(string.format("   ⚠️ 發現可疑參數名稱 [%s] -> 數值: %s", desc:GetFullName(), tostring(desc.Value)))
+			end
+		end
+	end
+
+	-- 👤 3. 搜尋玩家自己身上的資料夾（例如 leaderstats 或內部數據）
+	print("【3】正在掃描玩家自身數據庫...")
+	for _, desc in ipairs(localPlayer:GetDescendants()) do
+		if desc:IsA("StringValue") and isPotentialWord(desc.Value) then
+			print(string.format("   👤 發現玩家身上字串 [%s] -> 當前數值: \"%s\"", desc:GetFullName(), desc.Value))
+		end
+	end
+	
+	print("=============================================\n")
+end
+
+-- 每 3 秒轟炸式掃描一次
+task.spawn(function()
+	if not game:IsLoaded() then game.Loaded:Wait() end
+	while true do
+		scanForCurrentWord()
+		task.wait(3)
+	end
+end)
