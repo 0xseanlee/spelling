@@ -1,0 +1,78 @@
+-- 直接複製這整段貼進你的工具裡執行
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+-- 1. 在遊戲畫面左上角建立一個專用除錯看板
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "0xShop_InGameDebug"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local logLabel = Instance.new("TextLabel")
+logLabel.Size = UDim2.new(0, 400, 0, 150)
+logLabel.Position = UDim2.new(0, 20, 0, 20)
+logLabel.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+logLabel.BackgroundTransparency = 0.2
+logLabel.TextColor3 = Color3.fromRGB(255, 50, 50) -- 紅字報錯
+logLabel.TextSize = 14
+logLabel.Font = Enum.Font.Code
+logLabel.TextAlignment = Enum.TextAlignment.TopLeft
+logLabel.Text = "=== 0x商城 遊戲內即時監測 ===\n狀態: 正在掃描..."
+logLabel.Parent = screenGui
+
+local function updateLog(msg, isSuccess)
+	if isSuccess then
+		logLabel.TextColor3 = Color3.fromRGB(0, 255, 255) -- 成功抓到變藍綠色
+	else
+		logLabel.TextColor3 = Color3.fromRGB(255, 50, 50)
+	end
+	logLabel.Text = "=== 0x商城 遊戲內即時監測 ===\n" .. msg
+end
+
+-- 2. 核心地毯式掃描
+local lastWord = ""
+local function scan()
+	local success, err = pcall(function()
+		-- 掃描 UI
+		for _, gui in ipairs(playerGui:GetChildren()) do
+			if gui.Name ~= "0xShop_InGameDebug" and gui:IsA("ScreenGui") then
+				for _, desc in ipairs(gui:GetDescendants()) do
+					if desc:IsA("TextLabel") and #desc.Text > 1 and desc.Text ~= "Label" and desc.Text ~= "Text" then
+						if string.match(desc.Text, "%a+") then
+							if desc.Text ~= lastWord then
+								lastWord = desc.Text
+								updateLog("📍 UI 抓取成功！\n路徑: " .. gui.Name .. "." .. desc.Name .. "\n當前單字:【" .. lastWord .. "】", true)
+							end
+							return
+						end
+					end
+				end
+			end
+		end
+		
+		-- 掃描 ReplicatedStorage
+		for _, desc in ipairs(ReplicatedStorage:GetDescendants()) do
+			if desc:IsA("StringValue") and #desc.Value > 1 then
+				if desc.Value ~= lastWord then
+					lastWord = desc.Value
+					updateLog("📦 共享區抓取成功！\n名稱: " .. desc.Name .. "\n當前單字:【" .. lastWord .. "】", true)
+				end
+				return
+			end
+		end
+	end)
+	
+	if not success then
+		updateLog("❌ 腳本執行出錯:\n" .. tostring(err), false)
+	end
+end
+
+-- 循環執行
+task.spawn(function()
+	while true do
+		scan()
+		task.wait(1)
+	end
+end)
