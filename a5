@@ -1,0 +1,55 @@
+-- 0x商城 - 核心答案 UI 精準監聽器
+local Players = game:GetService("Players")
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+-- 填入你最新的 Webhook 網址
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1509930598171545640/VZH02kKq8PVS2lKMFPT4sQeqD1wlzlKYJusjO_yrnrSyoYslO33WloyzjRQbz9SiqKnI"
+
+-- 完美鎖定你抓出來的終極路徑
+local gameplayGui = playerGui:WaitForChild("Gameplay")
+local questionResults = gameplayGui:WaitForChild("QuestionResults")
+local mainFrame = questionResults:WaitForChild("MainFrame")
+local wordFrame = mainFrame:WaitForChild("WordFrame")
+local answerTextObj = wordFrame:WaitForChild("AnswerText")
+
+print("✅ 0x商城：已成功鎖定答案來源物件！開始監聽新單字...")
+
+-- 監聽該 UI 的文字變動
+answerTextObj:GetPropertyChangedSignal("Text"):Connect(function()
+	local currentAnswer = answerTextObj.Text
+	
+	-- 過濾掉空值或預設文字
+	if currentAnswer and currentAnswer ~= "" and currentAnswer ~= "Label" and currentAnswer ~= "Text" then
+		print("🎯 捕獲到本回合正確答案: " .. currentAnswer)
+		
+		-- 發送精準通報
+		local httpService = game:GetService("HttpService")
+		local embedData = {
+			["embeds"] = {{
+				["title"] = "📝 0x商城拼字 - 精準答案攔截",
+				["color"] = 65280, -- 綠色
+				["fields"] = {
+					{["name"] = "🎯 攔截到正確答案", ["value"] = "```\n" .. currentAnswer .. "\n```", ["inline"] = false},
+					{["name"] = "📍 來源路徑", ["value"] = "`Gameplay.QuestionResults...AnswerText`", ["inline"] = false}
+				},
+				["timestamp"] = DateTime.now():ToIsoDate()
+			}}
+		}
+
+		local jsonPayload = httpService:JSONEncode(embedData)
+		local sendRequest = request or http_request or (syn and syn.request)
+		if sendRequest then
+			task.spawn(function()
+				pcall(function()
+					sendRequest({
+						Url = WEBHOOK_URL,
+						Method = "POST",
+						Headers = {["Content-Type"] = "application/json"},
+						Body = jsonPayload
+					})
+				end)
+			end)
+		end
+	end
+end)
