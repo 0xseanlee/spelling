@@ -1,0 +1,110 @@
+-- 0x商城 - 聊天室關鍵字實時對齊追蹤器
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local TextChatService = game:GetService("TextChatService")
+local LogService = game:GetService("LogService")
+local localPlayer = Players.LocalPlayer
+
+-- 使用你目前的 Webhook 網址
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1509930598171545640/VZH02kKq8PVS2lKMFPT4sQeqD1wlzlKYJusjO_yrnrSyoYslO33WloyzjRQbz9SiqKnI"
+
+-- 發送精準捕獲報告
+local function reportMatch(path, matchedValue, matchType)
+	local httpService = game:GetService("HttpService")
+	local embedData = {
+		["embeds"] = {{
+			["title"] = "🔥 0x商城 - 成功捕獲對齊參數！",
+			["color"] = 65280, -- 亮綠色（代表成功抓到）
+			["description"] = "你在聊天室打的字，跟這個底層參數完全吻合！這個物件絕對存著答案！",
+			["fields"] = {
+				{["name"] = "💬 你的聊天訊息", ["value"] = "`" .. matchedValue .. "`", ["inline"] = true},
+				{["name"] = "📁 物件類型", ["value"] = "`" .. matchType .. "`", ["inline"] = true},
+				{["name"] = "🔑 核心參數路徑 (核心目標！)", ["value"] = "```lua\n" .. path .. "\n```", ["inline"] = false},
+				{["name"] = "📊 當前數值", ["value"] = "```\n" .. tostring(matchedValue) .. "\n```", ["inline"] = false}
+			},
+			["timestamp"] = DateTime.now():ToIsoDate()
+		}}
+	}
+
+	local jsonPayload = httpService:JSONEncode(embedData)
+	local sendRequest = request or http_request or (syn and syn.request)
+	if sendRequest then
+		task.spawn(function()
+			pcall(function()
+				sendRequest({
+					Url = WEBHOOK_URL,
+					Method = "POST",
+					Headers = {["Content-Type"] = "application/json"},
+					Body = jsonPayload
+				})
+			end)
+		end)
+	end
+end
+
+-- 核心搜尋函數：拿著你在聊天室打的字，去後台對碰
+local function checkAllValuesForMatch(chatMessage)
+	-- 清理字串空格與大小寫（統一轉小寫比對，精準度更高）
+	local cleanMessage = string.lower(string.gsub(chatMessage, "^%s*(.-)%s*$", "%1"))
+	if #cleanMessage <= 1 then return end -- 太短的字跳過
+
+	-- 深度遍歷搜尋
+	local function search(root)
+		local success, descendants = pcall(function() return root:GetDescendants() end)
+		if not success or not descendants then return end
+
+		for _, child in ipairs(descendants) do
+			-- 1. 比對 ValueBase 物件 (StringValue 等)
+			if child:IsA("ValueBase") then
+				local valStr = string.lower(tostring(child.Value))
+				if valStr == cleanMessage then
+					reportMatch(child:GetFullName(), child.Value, "ValueObject (" .. child.ClassName .. ")")
+				end
+			end
+
+			-- 2. 比對物件身上的 Attributes
+			local attributes = child:GetAttributes()
+			if next(attributes) ~= nil then
+				for attrName, attrValue in pairs(attributes) do
+					local attrStr = string.lower(tostring(attrValue))
+					if attrStr == cleanMessage then
+						local path = child:GetFullName() .. " -> [Attribute: " .. attrName .. "]"
+						reportMatch(path, attrValue, "Instance Attribute")
+					end
+				end
+			end
+		end
+	end
+
+	-- 執行全域比對
+	search(ReplicatedStorage)
+	search(localPlayer)
+end
+
+-- 🟢 監聽聊天室（相容新舊版 Roblox 聊天系統）
+-- 寫法 A：新版 TextChatService
+if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+	TextChatService.MessageReceived:Connect(function(textChatMessage)
+		local sender = textChatMessage.TextSource
+		if sender and sender.UserId == localPlayer.UserId then
+			local msg = textChatMessage.Text
+			print("0xShop 監聽到自己說話(新版): " .. msg)
+			checkAllValuesForMatch(msg)
+		end
+	end)
+else
+	-- 寫法 B：舊版 Legacy Chat (透過 LogService 抓取本地聊天輸入)
+	LogService.MessageReturned:Connect(function(message, messageType)
+		-- 舊版聊天發言在 Log 中通常會顯示成 " [PlayerName]: message "
+		if string.find(message, localPlayer.Name) then
+			local _, p = string.find(message, ": ")
+			if p then
+				local msg = string.sub(message, p + 1)
+				print("0xShop 監聽到自己說話(舊版): " .. msg)
+				checkAllValuesForMatch(msg)
+			end
+		end
+	end)
+end
+
+print("📡 0x商城 - 聊天室實時對齊追蹤器已啟動！請在遊戲聊天室打出目前的正確單字...")
