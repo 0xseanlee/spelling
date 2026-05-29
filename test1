@@ -1,0 +1,50 @@
+-- 放置於 ServerScriptService 的 ModuleScript 或 Regular Script
+local DebugManager = {}
+
+-- 假設這是你遊戲中的核心參數資料庫（可以連結你原本的遊戲主程式）
+local GameState = {
+	CurrentWord = "Roblox",      -- 當前考題單字
+	TimeLeft = 30,               -- 剩餘時間
+	TotalPlayers = 0,            -- 目前遊玩人數
+	Difficulty = "Medium"        -- 目前難度
+}
+
+-- 模擬儲存玩家個別參數的表格
+local PlayerStats = {
+	-- 格式範例： ["玩家名稱"] = { Score = 10, Streak = 3 }
+}
+
+-- [核心功能]：列印目前所有遊戲參數
+function DebugManager.ShowAllStats()
+	print("\n=== 🛠️ 0x商城拼字遊戲 - 當前全域參數 === ")
+	print(string.format("當前單字: %s", GameState.CurrentWord))
+	print(string.format("剩餘時間: %d 秒", GameState.TimeLeft))
+	print(string.format("目前難度: %s", GameState.Difficulty))
+	print(string.format("總人數: %d", #game.Players:GetPlayers()))
+	
+	print("\n--- 👤 玩家個別參數狀態 ---")
+	local players = game.Players:GetPlayers()
+	if #players == 0 then
+		print("目前遊戲內沒有玩家。")
+	else
+		for _, player in ipairs(players) do
+			-- 這裡假設你把分數存在 Leaderstats 裡，或是上面的 PlayerStats 表格中
+			local leaderstats = player:FindFirstChild("leaderstats")
+			local score = leaderstats and leaderstats:FindFirstChild("Score") and leaderstats.Score.Value or 0
+			local streak = leaderstats and leaderstats:FindFirstChild("Streak") and leaderstats.Streak.Value or 0
+			
+			print(string.format("玩家: %s | 分數: %d | 連勝(Streak): %d", player.Name, score, streak))
+		end
+	end
+	print("=========================================\n")
+end
+
+-- [自動化]：每隔 5 秒自動在 Output 視窗更新一次數據
+task.spawn(function()
+	while true do
+		task.wait(5) -- 每 5 秒輸出一次，可自行調整
+		DebugManager.ShowAllStats()
+	end
+end)
+
+return DebugManager
