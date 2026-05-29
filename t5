@@ -1,0 +1,100 @@
+-- 0x商城 - 全域對象地毯式參數掃描器
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local localPlayer = Players.LocalPlayer
+
+local WEBHOOK_URL = "https://discord.com/api/webhooks/1509923254184185930/frNMjlxr7ZtWF_HPuXq1KpN3ush9aZVFBRp5dSBdcpvZ4m2QI0p7aRhv98p7bvxO6dFw"
+
+-- 儲存已經發送過的數據，避免重複轟炸 Webhook
+local sentDataCache = {}
+
+-- 發送 Webhook 函數
+local function sendWebhook(title, infoType, path, value)
+	local cacheKey = path .. tostring(value)
+	if sentDataCache[cacheKey] then return end -- 如果這條數據完全沒變，就跳過
+	sentDataCache[cacheKey] = true
+
+	local httpService = game:GetService("HttpService")
+	local embedData = {
+		["embeds"] = {{
+			["title"] = "🚨 0x商城 - 全域參數掃描回報",
+			["color"] = 16753920, -- 橘黃色警告風
+			["fields"] = {
+				{["name"] = "📁 參數類型", ["value"] = "`" .. infoType .. "`", ["inline"] = true},
+				{["name"] = "🔑 參數路徑", ["value"] = "```lua\n" .. path .. "\n```", ["inline"] = false},
+				{["name"] = "📊 目前數值", ["value"] = "```\n" .. tostring(value) .. "\n```", ["inline"] = false}
+			},
+			["timestamp"] = DateTime.now():ToIsoDate()
+		}}
+	}
+
+	local jsonPayload = httpService:JSONEncode(embedData)
+	local sendRequest = request or http_request or (syn and syn.request)
+	
+	if sendRequest then
+		task.spawn(function()
+			sendRequest({
+				Url = WEBHOOK_URL,
+				Method = "POST",
+				Headers = {["Content-Type"] = "application/json"},
+				Body = jsonPayload
+			})
+		end)
+	end
+end
+
+-- 核心：深度遞迴掃描函數
+local function deepScan(object)
+	-- 安全檢查，避免有些物件無權限存取導致腳本崩潰
+	local success, children = pcall(function() return object:GetChildren() end)
+	if not success or not children then return end
+
+	for _, child in ipairs(children) do
+		-- 💡 1. 檢查是否為 ValueBase 系列（IntValue, StringValue, BoolValue, NumberValue 等）
+		if child:IsA("ValueBase") then
+			local path = child:GetFullName()
+			local val = child.Value
+			if val ~= nil and tostring(val) ~= "" then
+				sendWebhook("發現配置參數", "ValueObject (" .. child.ClassName .. ")", path, val)
+			end
+		end
+
+		-- 💡 2. 檢查是否為 UI 文字元素（TextLabel, TextBox, TextButton）
+		if child:IsA("TextLabel") or child:IsA("TextBox") or child:IsA("TextButton") then
+			local path = child:GetFullName()
+			local text = child.Text
+			-- 過濾掉系統預設字
+			if text and text ~= "" and text ~= "Label" and text ~= "Text" and #text > 1 then
+				sendWebhook("發現UI文字", "UI Text (" .. child.ClassName .. ")", path, text)
+			end
+		end
+
+		-- 💡 3. 檢查是否有 Attributes (Roblox 新版很常用這個存隱藏參數)
+		local attributes = child:GetAttributes()
+		if next(attributes) ~= nil then
+			for attrName, attrValue in pairs(attributes) do
+				local path = child:GetFullName() .. " -> [Attribute: " .. attrName .. "]"
+				sendWebhook("發現隱藏屬性", "Instance Attribute", path, attrValue)
+			end
+		end
+
+		-- 繼續往下鑽（遞迴呼叫）
+		deepScan(child)
+	end
+end
+
+-- 開始執行全域大掃描
+task.spawn(function()
+	print("📡 0x商城 - 全域痊癒參數地毯式掃描開始...")
+	
+	while true do
+		-- 針對三大最核心的參數存放地進行深度掃描
+		deepScan(ReplicatedStorage)       -- 伺服器與前端共享區
+		deepScan(localPlayer)              -- 玩家自己身上的資料 (含 leaderstats)
+		if localPlayer:FindFirstChild("PlayerGui") then
+			deepScan(localPlayer.PlayerGui) -- 玩家的所有 UI 畫面
+		end
+		
+		task.wait(3) -- 每 3 秒重新全面巡邏一次
+	end
+end)
